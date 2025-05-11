@@ -1,0 +1,259 @@
+-- [[ Drawings ]] --
+local Fov = Drawing.new("Circle")
+Fov.Color = elysian.ForceHit.FOV.Color
+Fov.Thickness = elysian.ForceHit.FOV.Thickness
+Fov.Filled = false
+Fov.Transparency = elysian.ForceHit.FOV.Transparency
+Fov.Radius = elysian.ForceHit.FOV.Radius
+
+local Highlight = Instance.new("Highlight")
+Highlight.Parent = game.CoreGui
+Highlight.FillColor = Color3.fromRGB(0, 255, 0)
+Highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+Highlight.FillTransparency = 0.5
+Highlight.OutlineTransparency = 0
+Highlight.Enabled = false
+
+-- [[ ESP System ]] --
+local ESPObjects = {}
+
+local function CreateESP(Player)
+    if ESPObjects[Player] then return end
+
+    local Box = Drawing.new("Square")
+    Box.Thickness = 1
+    Box.Color = Color3.fromRGB(150, 150, 150)
+    Box.Transparency = 1
+    Box.Filled = false
+    Box.Visible = false
+
+    local Name = Drawing.new("Text")
+    Name.Size = 16
+    Name.Color = Color3.fromRGB(255, 255, 255)
+    Name.Center = true
+    Name.Outline = true
+    Name.Visible = false
+
+    local Studs = Drawing.new("Text")
+    Studs.Size = 14
+    Studs.Color = Color3.fromRGB(150, 150, 150)
+    Studs.Center = true
+    Studs.Outline = true
+    Studs.Visible = false
+
+    ESPObjects[Player] = {Box = Box, Name = Name, Studs = Studs}
+end
+
+local function RemoveESP(Player)
+    if ESPObjects[Player] then
+        for _, d in pairs(ESPObjects[Player]) do
+            if d.Remove then d:Remove() end
+        end
+        ESPObjects[Player] = nil
+    end
+end
+
+local function RefreshESPs()
+    for _, v in pairs(ESPObjects) do
+        for _, d in pairs(v) do
+            if d.Remove then d:Remove() end
+        end
+    end
+    table.clear(ESPObjects)
+    for _, Player in pairs(Players:GetPlayers()) do
+        if Player ~= LocalPlayer then
+            CreateESP(Player)
+        end
+    end
+end
+
+Players.PlayerAdded:Connect(function(player)
+    if player ~= LocalPlayer then
+        CreateESP(player)
+    end
+end)
+
+Players.PlayerRemoving:Connect(function(player)
+    RemoveESP(player)
+end)
+
+RefreshESPs()
+
+-- [[ ESP Render ]] --
+RunService.RenderStepped:Connect(function()
+    for Player, Drawings in pairs(ESPObjects) do
+        local Char = Player.Character
+        if Char and Char:FindFirstChild("HumanoidRootPart") and Char:FindFirstChild("Humanoid") and Char.Humanoid.Health > 0 then
+            local Root = Char:FindFirstChild("HumanoidRootPart")
+            local Head = Char:FindFirstChild("Head")
+            local screenPos, onScreen = Camera:WorldToViewportPoint(Root.Position)
+
+            if onScreen then
+                local distance = (Camera.CFrame.Position - Root.Position).Magnitude
+                local scale = 1 / distance * 100
+                local width = 3.5 * scale * 50 * elysian.ForceHit.EspBox
+                local height = 5.5 * scale * 50 * elysian.ForceHit.EspBox
+                local boxPos = Vector2.new(screenPos.X - width / 2, screenPos.Y - height / 2)
+
+                -- Box
+                Drawings.Box.Size = Vector2.new(width, height)
+                Drawings.Box.Position = boxPos
+                Drawings.Box.Visible = true
+
+                -- Name (DisplayName)
+                if Head then
+                    local headScreen = Camera:WorldToViewportPoint(Head.Position + Vector3.new(0, 0.5, 0))
+                    Drawings.Name.Text = Player.DisplayName  -- Use DisplayName instead of Name
+                    Drawings.Name.Position = Vector2.new(headScreen.X, headScreen.Y - 18)
+                    Drawings.Name.Visible = true
+                else
+                    Drawings.Name.Visible = false
+                end
+
+                -- Studs
+                Drawings.Studs.Text = "(" .. math.floor(distance) .. " studs)"
+                Drawings.Studs.Position = Vector2.new(screenPos.X, screenPos.Y + height / 2 + 2)
+                Drawings.Studs.Visible = true
+            else
+                Drawings.Box.Visible = false
+                Drawings.Name.Visible = false
+                Drawings.Studs.Visible = false
+            end
+        else
+            Drawings.Box.Visible = false
+            Drawings.Name.Visible = false
+            Drawings.Studs.Visible = false
+        end
+    end
+end)
+
+-- [[ Aimbot Closest Player (Nearest to Cursor in FOV) ]] --
+local CachedClosestPlayer, SelectedTarget
+
+local function GetClosestPlayer()
+    local ClosestDistance, ClosestPart = nil, nil
+    local MousePosition = UserInput:GetMouseLocation()
+
+    for _, Player in next, Players:GetPlayers() do
+        if Player ~= LocalPlayer and Player.Character then
+            local Character = Player.Character
+            local Humanoid = Character:FindFirstChild("Humanoid")
+            local ForceField = Character:FindFirstChildOfClass("ForceField")
+
+            if Humanoid and Humanoid.Health > 0 and not ForceField then
+                local Head = Character:FindFirstChild("Head")
+                if Head then
+                    local ScreenPosition, Visible = Camera:WorldToScreenPoint(Head.Position)
+                    if Visible then
+                        local Distance = (MousePosition - Vector2.new(ScreenPosition.X, ScreenPosition.Y)).Magnitude
+                        if Distance <= elysian.ForceHit.FOV.Radius and (not ClosestDistance or Distance < ClosestDistance) then
+                            ClosestDistance, ClosestPart = Distance, Head
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return ClosestPart
+end
+
+-- [[ Aimbot Rendering ]] --
+RunService.RenderStepped:Connect(function()
+    if elysian.ForceHit.Enabled then
+        Fov.Visible = elysian.ForceHit.FOV.Visible
+        Fov.Position = UserInput:GetMouseLocation()
+        Fov.Radius = elysian.ForceHit.FOV.Radius
+
+        if elysian.ForceHit.FOV.Visible then
+            -- Rainbow FOV effect
+            Fov.Color = Color3.fromHSV(workspace:GetServerTimeNow() % 5 / 5, 1, 1)
+        end
+
+        local target = SelectedTarget or CachedClosestPlayer
+        if target and target.Parent then
+            Highlight.Adornee = target.Parent
+            Highlight.Enabled = true
+        else
+            Highlight.Enabled = false
+        end
+    else
+        Fov.Visible = false
+        Highlight.Enabled = false
+    end
+end)
+
+RunService.Heartbeat:Connect(function()
+    if elysian.ForceHit.Enabled then
+        CachedClosestPlayer = GetClosestPlayer()
+    end
+end)
+
+-- [[ Hook Remote Event ]] --
+local OriginalNameCall
+OriginalNameCall = hookmetamethod(game, "__namecall", function(Object, ...)
+    local Args = {...}
+    local Method = getnamecallmethod()
+
+    if not elysian.ForceHit.Enabled then
+        return OriginalNameCall(Object, ...)
+    end
+
+    if Method == "InvokeServer" and Object.Name == "MainFunction" and Args[1] == "GunCheck" then
+        return nil
+    end
+
+    if Method == "FireServer" and Object.Name == "MainEvent" and Args[1] == "Shoot" then
+        local AimPart = SelectedTarget or CachedClosestPlayer
+        if AimPart and Args[2] and #Args[2] > 0 then
+            for _, tbl in pairs(Args[2][1]) do
+                tbl["Instance"] = AimPart
+            end
+            for _, tbl in pairs(Args[2][2]) do
+                tbl["thePart"] = AimPart
+                tbl["theOffset"] = CFrame.new()
+            end
+        end
+        return OriginalNameCall(Object, unpack(Args))
+    end
+
+    return OriginalNameCall(Object, ...)
+end)
+
+-- [[ BlankShots AutoFire ]] --
+RunService.Heartbeat:Connect(function()
+    if not elysian.ForceHit.BlankShots then return end
+
+    local HasTool = false
+    for _, item in pairs(LocalPlayer.Backpack:GetChildren()) do
+        if item:IsA("Tool") then
+            HasTool = true
+            break
+        end
+    end
+    if not HasTool then return end
+
+    local AimPart = CachedClosestPlayer
+    if AimPart and MainEvent then
+        local args = {
+            "Shoot",
+            {
+                {
+                    [1] = {
+                        ["Instance"] = AimPart,
+                        ["Normal"] = Vector3.new(0, 1, 0),
+                        ["Position"] = AimPart.Position
+                    }
+                },
+                {
+                    [1] = {
+                        ["thePart"] = AimPart,
+                        ["theOffset"] = CFrame.new(0, 0, 0)
+                    }
+                },
+                LocalPlayer.Character.Head.Position,
+                LocalPlayer.Character.HumanoidRootPart.Position
+            }
+        }
+        MainEvent:FireServer(unpack(args))
+    end
+end)
